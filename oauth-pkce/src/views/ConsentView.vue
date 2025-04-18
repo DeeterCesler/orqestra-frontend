@@ -3,18 +3,18 @@
     <div v-if="error" class="error-container">
       <h2>Error</h2>
       <p>{{ error }}</p>
-      <div class="error-details">
+      <div class="error-details" v-if="missingParams?.length">
         <p>Missing or invalid parameters:</p>
         <ul>
           <li v-for="param in missingParams" :key="param">{{ param }}</li>
         </ul>
-        <button @click="goBack" class="cancel-btn">Go back</button>
       </div>
+      <button @click="goBack" class="cancel-btn">Go back</button>
     </div>
     
     <div v-else-if="loading" class="loading-container">
       <div class="loader"></div>
-      <p>Loading application details...</p>
+      <p>{{ loadingMessage }}</p>
     </div>
     
     <div v-else class="consent-container">
@@ -29,8 +29,15 @@
       <div class="divider"></div>
 
       <div class="consent-content">
-        <img v-if="clientInfo.logo_uri" :src="clientInfo.logo_uri" :alt="clientInfo.name + ' logo'" class="external-app-logo">
-        <h1 class="consent-title"><b>{{ clientInfo.name || 'An application' }}</b> wants to access your Orqestra account.</h1>
+        <img v-if="clientInfo?.logo_uri" :src="clientInfo.logo_uri" :alt="clientInfo.name + ' logo'" class="external-app-logo">
+        <h1 class="consent-title">
+          <span v-if="clientInfo.previously_consented">
+            <b>{{ clientInfo.name || 'An application' }}</b> would like to continue accessing your Orqestra account.
+          </span>
+          <span v-else>
+            <b>{{ clientInfo.name || 'An application' }}</b> wants to access your Orqestra account.
+          </span>
+        </h1>
         
         <div class="app-details">
           <p class="app-description">{{ clientInfo.display_description }}</p>
@@ -38,18 +45,22 @@
 
         <div class="permissions">
           <span v-if="clientInfo?.scope_description?.length > 0">
-          <h2>This will allow {{ clientInfo.name || 'the application' }} to:</h2>
-          <ul class="scope-list">
-              <li v-for="scope in clientInfo.scope_description" :key="scope.name" class="scope-item">
+            <h2>
+              <span v-if="clientInfo.previously_consented">
+                This will continue allowing {{ clientInfo.name || 'the application' }} to:
+              </span>
+              <span v-else>
+                This will allow {{ clientInfo.name || 'the application' }} to:
+              </span>
+            </h2>
+            <ul class="scope-list">
+              <li v-for="scope in clientInfo.scope_description" :key="scope" class="scope-item">
                 <div class="scope-icon">✓</div>
                 <div class="scope-content">
                   <p>{{ scope }}</p>
                 </div>
               </li>
             </ul>
-          </span>
-          <span v-else class="no-permissions">
-            <p>No permissions requested.</p>
           </span>
         </div>
 
@@ -68,35 +79,57 @@
 </template>
 
 <script>
+import { baseUrl, jwt } from '../config' // Obvi this wouldn't be hardcoded in a real app
+
 export default {
   name: 'ConsentView',
   data() {
     return {
       loading: true,
       error: null,
-      clientInfo: {
-        client_id: '',
-        name: '',
-        display_description: '',
-        logo_uri: '',
-        scope_description: [],
-        previously_consented: false
-      },
+      loadingMessage: 'Loading application details...',
       queryParams: {
         client_id: '',
-        state: '',
         redirect_uri: '',
         response_type: '',
         scope: '',
         code_challenge: '',
-        code_challenge_method: ''
-      }
+        code_challenge_method: '',
+        state: ''
+      },
+      clientInfo: {
+        client_id: '',
+        name: '',
+        display_description: '',
+        scope_description: [],
+        previously_consented: false
+      },
+      missingParams: []
     }
   },
-  created() {
-    this.initializeQueryParams()
-    if (!this.error) {
-      this.fetchClientInfo()
+  async created() {
+    try {
+      // Parse query parameters from URL
+      const urlParams = new URLSearchParams(window.location.search)
+      this.queryParams = {
+        client_id: urlParams.get('client_id') || '',
+        redirect_uri: urlParams.get('redirect_uri') || '',
+        response_type: urlParams.get('response_type') || '',
+        scope: urlParams.get('scope') || '',
+        code_challenge: urlParams.get('code_challenge') || '',
+        code_challenge_method: urlParams.get('code_challenge_method') || '',
+        state: urlParams.get('state') || ''
+      }
+
+      // Validate parameters before proceeding
+      await this.validateParams(this.queryParams)
+      
+      // Fetch client info if validation passes
+      await this.fetchClientInfo()
+    } catch (err) {
+      this.error = err.message
+    } finally {
+      this.loading = false
     }
   },
   methods: {
@@ -114,6 +147,7 @@ export default {
       const missingParams = requiredParams.filter(param => !params[param]?.trim())
       
       if (missingParams.length > 0) {
+        this.missingParams = missingParams
         throw new Error(`Missing required parameters: ${missingParams.join(', ')}`)
       }
 
@@ -136,44 +170,13 @@ export default {
 
       return true
     },
-    initializeQueryParams() {
-      try {
-        const urlParams = new URLSearchParams(window.location.search)
-        
-        // Log raw URL parameters for debugging
-        console.log('Raw URL parameters:', Object.fromEntries(urlParams.entries()))
-        
-        const params = {
-          client_id: urlParams.get('client_id')?.trim(),
-          state: urlParams.get('state')?.trim(),
-          redirect_uri: decodeURIComponent(urlParams.get('redirect_uri') || '').trim(),
-          response_type: urlParams.get('response_type')?.trim(),
-          scope: urlParams.get('scope')?.trim(),
-          code_challenge: urlParams.get('code_challenge')?.trim(),
-          code_challenge_method: urlParams.get('code_challenge_method')?.trim()
-        }
-
-        // Validate parameters
-        this.validateParams(params)
-        
-        // If validation passes, set the parameters
-        this.queryParams = params
-
-        // Log processed parameters for debugging
-        console.log('Processed parameters:', this.queryParams)
-      } catch (err) {
-        console.error('Error processing parameters:', err)
-        this.error = err.message
-        this.loading = false
-      }
-    },
     async fetchClientInfo() {
       try {
         const response = await fetch(
-          `https://dev-api.orqestra.io/oauth/scopes?client_id=${this.queryParams.client_id}&scope=${this.queryParams.scope}`,
+          `${baseUrl}/oauth/scopes?client_id=${this.queryParams.client_id}&scope=${this.queryParams.scope}`,
           {
             headers: {
-              'Authorization': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im5ldGZvcnVtK29saXZAZ21haWwuY29tIiwiaWQiOjc1LCJwcm92aWRlciI6Im5vbmUifQ.hBu6-PxvoyoHUorzCs6xkP2A1ZgmcZ8QzRTKepq0iIY'
+              'Authorization': jwt
             }
           }
         )
@@ -182,62 +185,82 @@ export default {
           throw new Error('Failed to fetch application details')
         }
         
-        this.clientInfo = await response.json();
-        this.clientInfo = this.clientInfo.data;
+        const responseData = await response.json();
+        
+        this.clientInfo = {
+          ...this.clientInfo,
+          client_id: responseData.data.client_id,
+          name: responseData.data.name,
+          display_description: responseData.data.display_description,
+          scope_description: responseData.data.scope_description || [],
+          previously_consented: true
+        }
       } catch (err) {
-        console.error('Error fetching client info:', err)
         this.error = err.message
       } finally {
         this.loading = false
       }
     },
+    async authorizeClient() {
+      const url = new URL(`${baseUrl}/oauth/authorize`)
+      url.searchParams.append('client_id', this.queryParams.client_id)
+      url.searchParams.append('redirect_uri', this.queryParams.redirect_uri)
+      url.searchParams.append('response_type', this.queryParams.response_type)
+      url.searchParams.append('scope', this.queryParams.scope)
+      url.searchParams.append('code_challenge', this.queryParams.code_challenge)
+      url.searchParams.append('code_challenge_method', this.queryParams.code_challenge_method)
+
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          'Authorization': jwt
+        }
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Authorization failed')
+      }
+
+      this.loadingMessage = 'Redirecting...'
+
+      const { code } = await response.json()
+      
+      const redirectUrl = new URL(this.queryParams.redirect_uri)
+      redirectUrl.searchParams.append('code', code)
+      console.log(redirectUrl)
+      alert(redirectUrl)
+      if (this.queryParams.state) {
+        redirectUrl.searchParams.append('state', this.queryParams.state)
+      }
+      
+      return { redirect_uri: redirectUrl.toString() }
+    },
     async handleAuthorize() {
+      this.loading = true
+      this.loadingMessage = 'Authorizing...'
+      this.error = null
+
       try {
-        this.loading = true
-        
-        const url = new URL('https://dev-api.orqestra.io/oauth/authorize')
-        url.searchParams.append('client_id', this.queryParams.client_id)
-        url.searchParams.append('redirect_uri', this.queryParams.redirect_uri)
-        url.searchParams.append('response_type', this.queryParams.response_type)
-        url.searchParams.append('scope', this.queryParams.scope)
-        url.searchParams.append('code_challenge', this.queryParams.code_challenge)
-        url.searchParams.append('code_challenge_method', this.queryParams.code_challenge_method)
-
-        console.log('Request URL:', url.toString())
-
-        const response = await fetch(url.toString(), {
-          method: 'POST',
-          headers: {
-            'Authorization': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im5ldGZvcnVtK29saXZAZ21haWwuY29tIiwiaWQiOjc1LCJwcm92aWRlciI6Im5vbmUifQ.hBu6-PxvoyoHUorzCs6xkP2A1ZgmcZ8QzRTKepq0iIY'
-          }
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json()
-          console.error('Error response:', errorData)
-          throw new Error(errorData.message || 'Authorization failed')
+        const response = await this.authorizeClient()
+        if (response?.redirect_uri) {
+          window.location.href = response.redirect_uri
+          return
         }
-
-        const responseData = await response.json()
-        console.log('Success response:', responseData)
-        
-        const { code } = responseData
-        const redirectUrl = new URL(this.queryParams.redirect_uri)
-        redirectUrl.searchParams.append('code', code)
-        if (this.queryParams.state) {
-          redirectUrl.searchParams.append('state', this.queryParams.state)
-        }
-        
-        window.location.href = redirectUrl.toString()
+        throw new Error('Invalid response from authorization server')
       } catch (err) {
-        console.error('Error:', err)
-        this.error = err.message
+        console.error('Authorization error:', err)
+        this.error = err.message || 'An error occurred during authorization'
       } finally {
         this.loading = false
       }
     },
     goBack() {
-      window.history.back()
+      if (window.history.length > 1) {
+        window.history.back()
+      } else {
+        window.location.href = '/'
+      }
     }
   }
 }
@@ -251,6 +274,13 @@ export default {
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@media screen and (max-width: 768px) {
+  .consent-screen {
+    margin: 0;
+    min-height: 100vh;
+  }
 }
 
 .error-container {

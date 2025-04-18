@@ -1,6 +1,8 @@
 <template>
   <div class="home">
     <h1>Orqestra</h1>
+    <p>Homepage goes here.</p>
+    <a href="https://orqestra.io">Home</a>
   </div>
 </template>
 

@@ -15,6 +15,14 @@ const validParams = {
   code_challenge_method: 'S256'
 }
 
+const validClientInfo = {
+  name: 'Test App',
+  description: 'Test Description',
+  scopes: [
+    { name: 'conversion', description: 'Access to conversion data' }
+  ]
+}
+
 // helper function
 const createUrlWithParams = (params) => {
   const searchParams = new URLSearchParams()
@@ -47,6 +55,71 @@ describe('ConsentView', () => {
     })
   })
 
+  describe('Authorization Flow', () => {
+    test('handles authorization flow correctly', async () => {
+      window.location.search = createUrlWithParams(validParams)
+      const wrapper = mount(ConsentView)
+
+      // Wait for initial client info fetch and component update
+      await wrapper.vm.$nextTick()
+      await new Promise(resolve => setTimeout(resolve, 100))
+      await wrapper.vm.$nextTick()
+      
+      // Verify component is in the correct state
+      expect(wrapper.find('.error-container').exists()).toBe(false)
+      expect(wrapper.find('.consent-container').exists()).toBe(true)
+      expect(wrapper.find('.authorize-btn').exists()).toBe(true)
+      
+      const mockCode = 'test_auth_code'
+      
+      // Store the initial fetch call count to track the authorization call
+      const initialFetchCalls = global.fetch.mock.calls.length
+      
+      global.fetch.mockImplementationOnce(() => 
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ code: mockCode })
+        })
+      )
+      
+      await wrapper.find('.authorize-btn').trigger('click')
+      await wrapper.vm.$nextTick()
+      
+      // Get the authorization request call (should be the latest fetch call)
+      const authCall = global.fetch.mock.calls[initialFetchCalls]
+      expect(authCall).toBeTruthy()
+      
+      // Verify the POST request URL and method
+      const [requestUrl, requestInit] = authCall
+      expect(requestUrl).toContain('/oauth/authorize')
+      expect(requestInit).toEqual(expect.objectContaining({
+        method: 'POST',
+        headers: expect.any(Object)
+      }))
+
+      // Verify all required parameters are included in the authorization URL
+      const authUrlParams = new URL(requestUrl).searchParams
+      const expectedAuthParams = {
+        client_id: validParams.client_id,
+        redirect_uri: validParams.redirect_uri,
+        response_type: validParams.response_type,
+        scope: validParams.scope,
+        code_challenge: validParams.code_challenge,
+        code_challenge_method: validParams.code_challenge_method
+      }
+      
+      Object.entries(expectedAuthParams).forEach(([key, value]) => {
+        expect(authUrlParams.get(key)).toBe(value)
+      })
+
+      // Verify final redirect URL includes code and state
+      const expectedRedirectUrl = new URL(validParams.redirect_uri)
+      expectedRedirectUrl.searchParams.append('code', mockCode)
+      expectedRedirectUrl.searchParams.append('state', validParams.state)
+      expect(window.location.href).toBe(expectedRedirectUrl.toString())
+    })
+  })
+
   describe('Parameter Validation', () => {
     test('renders correctly with all valid parameters', async () => {
       // Set URL with all parameters
@@ -56,7 +129,7 @@ describe('ConsentView', () => {
       await wrapper.vm.$nextTick()
       
       // Wait for API call to resolve
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await new Promise(resolve => setTimeout(resolve, 100))
       
       expect(wrapper.find('.error-container').exists()).toBe(false)
       expect(wrapper.find('.consent-container').exists()).toBe(true)
@@ -169,14 +242,39 @@ describe('ConsentView', () => {
       )
     })
 
+    test('displays previously consented messaging when applicable', async () => {
+      window.location.search = createUrlWithParams(validParams)
+      
+      // Mock client info with previously_consented set to true
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: {
+            name: 'Test App',
+            description: 'Test Description',
+            previously_consented: true,
+            scope_description: ['Access to conversion data']
+          }
+        })
+      })
+      
+      const wrapper = mount(ConsentView)
+      await wrapper.vm.$nextTick()
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Verify the messaging reflects previous consent
+      const text = wrapper.text()
+      expect(text).toContain('would like to continue accessing')
+      expect(text).toContain('This will continue allowing')
+      expect(wrapper.find('.consent-container').exists()).toBe(true)
+    })
+
     test('cancel button exists', async () => {
       window.location.search = createUrlWithParams(validParams)
       
       const wrapper = mount(ConsentView)
       await wrapper.vm.$nextTick()
-      
-      // Wait for API call to resolve
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await new Promise(resolve => setTimeout(resolve, 100))
       
       expect(wrapper.find('.cancel-btn').exists()).toBe(true)
     })
@@ -189,9 +287,11 @@ describe('ConsentView', () => {
         new Promise(resolve => setTimeout(() => resolve({
           ok: true,
           json: () => Promise.resolve({
-            name: 'Test App',
-            description: 'Test Description',
-            scopes: []
+            data: {
+              name: 'Test App',
+              description: 'Test Description',
+              scopes: []
+            }
           })
         }), 100))
       )
