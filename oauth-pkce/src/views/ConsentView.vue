@@ -191,9 +191,9 @@ export default {
           ...this.clientInfo,
           client_id: responseData.data.client_id,
           name: responseData.data.name,
-          display_description: responseData.data.display_description,
+          display_description: responseData.data.display_description || responseData.data.description,
           scope_description: responseData.data.scope_description || [],
-          previously_consented: true
+          previously_consented: responseData.data.previously_consented || false
         }
       } catch (err) {
         this.error = err.message
