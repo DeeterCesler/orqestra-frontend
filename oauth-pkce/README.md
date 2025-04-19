@@ -36,7 +36,7 @@ To run the development server:
 npm run serve
 ```
 
-This will start the development server at `http://localhost:8080`.
+This will start the development server at `http://localhost:3000`.
 
 ## Building for Production
 
