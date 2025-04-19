@@ -228,8 +228,6 @@ export default {
       
       const redirectUrl = new URL(this.queryParams.redirect_uri)
       redirectUrl.searchParams.append('code', code)
-      console.log(redirectUrl)
-      alert(redirectUrl)
       if (this.queryParams.state) {
         redirectUrl.searchParams.append('state', this.queryParams.state)
       }
