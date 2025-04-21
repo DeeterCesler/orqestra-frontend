@@ -9,7 +9,7 @@ const params = {
     code_challenge_method: 'S256'
 }
 
-const jwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im5ldGZvcnVtK29saXZAZ21haWwuY29tIiwiaWQiOjc1LCJwcm92aWRlciI6Im5vbmUifQ.hBu6-PxvoyoHUorzCs6xkP2A1ZgmcZ8QzRTKepq0iIY'
+const jwt = process.env.VUE_APP_JWT_SECRET
 
 const baseUrl = 'https://dev-api.orqestra.io';
 
